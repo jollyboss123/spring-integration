@@ -1,24 +1,22 @@
 package com.jolly.springintegration;
 
+import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
-import org.springframework.integration.core.GenericHandler;
+import org.springframework.integration.annotation.Gateway;
+import org.springframework.integration.annotation.MessagingGateway;
 import org.springframework.integration.core.GenericTransformer;
 import org.springframework.integration.core.MessageSource;
 import org.springframework.integration.dsl.IntegrationFlow;
 import org.springframework.integration.dsl.MessageChannels;
-import org.springframework.integration.dsl.context.IntegrationFlowContext;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.stereotype.Component;
 
-import java.time.Duration;
 import java.time.Instant;
-import java.util.Set;
-import java.util.concurrent.TimeUnit;
 
 @SpringBootApplication
 public class SpringIntegrationApplication {
@@ -28,11 +26,16 @@ public class SpringIntegrationApplication {
     }
 
     @Bean
-    MessageChannel greetings() {
+    MessageChannel greetingsRequest() {
         return MessageChannels.direct().getObject();
     }
 
-    private static String text() {
+    @Bean
+    MessageChannel greetingsResult() {
+        return MessageChannels.direct().getObject();
+    }
+
+    static String text() {
         return Math.random() > .5 ?
                 "Hello " + Instant.now() + " !" :
                 "Hola " + Instant.now() + " !";
@@ -53,29 +56,40 @@ public class SpringIntegrationApplication {
         }
     }
 
-    private static IntegrationFlow buildFlow(CustomMessageSource customMessageSource, String filterText, Duration pollDurationRate) {
+    @Bean
+    IntegrationFlow flow() {
         return IntegrationFlow
-                .from(customMessageSource,
-                        sourcePollingChannelAdapterSpec -> sourcePollingChannelAdapterSpec.poller(
-                                pollerFactory -> pollerFactory.fixedRate(pollDurationRate)
-                        ))
-                .filter(String.class, source -> source.contains(filterText))
+                .from(greetingsRequest())
+                .filter(String.class, source -> source.contains("Hola"))
                 .transform((GenericTransformer<String, String>) String::toUpperCase)
-                .handle((GenericHandler<String>) (payload, headers) -> {
-                    System.out.println("the payload is " + payload);
-                    return null;
-                })
+//                .handle((GenericHandler<String>) (payload, headers) -> {
+//                    System.out.println("the payload is " + payload);
+//                    return null;
+//                })
+                .channel(greetingsResult())
                 .get();
     }
+}
 
-    @Bean
-    ApplicationRunner applicationRunner(CustomMessageSource customMessageSource, IntegrationFlowContext context) {
-        return args -> {
-            IntegrationFlow holaFlow = buildFlow(customMessageSource, "Hola", Duration.ofSeconds(1));
-            IntegrationFlow helloFlow = buildFlow(customMessageSource, "Hello", Duration.ofSeconds(2));
+@Component
+class Runner implements ApplicationRunner {
+    private final GreetingsClient greetingsClient;
 
-            Set.of(holaFlow, helloFlow).forEach(flow ->
-                    context.registration(flow).register().start());
-        };
+    Runner(GreetingsClient greetingsClient) {
+        this.greetingsClient = greetingsClient;
     }
+
+    @Override
+    public void run(ApplicationArguments args) throws Exception {
+        for (int i = 0; i < 10; i++) {
+            System.out.println(this.greetingsClient.greet(SpringIntegrationApplication.text()));
+        }
+    }
+}
+
+@MessagingGateway
+interface GreetingsClient {
+
+    @Gateway(requestChannel = "greetingsRequest", replyChannel = "greetingsResult")
+    String greet(String text);
 }
