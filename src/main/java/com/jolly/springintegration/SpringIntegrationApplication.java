@@ -1,5 +1,6 @@
 package com.jolly.springintegration;
 
+import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
@@ -9,7 +10,6 @@ import org.springframework.integration.core.MessageSource;
 import org.springframework.integration.dsl.IntegrationFlow;
 import org.springframework.integration.dsl.MessageChannels;
 import org.springframework.messaging.MessageChannel;
-import org.springframework.messaging.MessageHeaders;
 import org.springframework.messaging.support.MessageBuilder;
 
 import java.time.Instant;
@@ -22,25 +22,32 @@ public class SpringIntegrationApplication {
     }
 
     @Bean
-    MessageChannel atob() {
+    MessageChannel greetings() {
         return MessageChannels.direct().getObject();
+    }
+
+    private String text() {
+        return Math.random() > .5 ?
+                "Hello " + Instant.now() + " !" :
+                "Hola " + Instant.now() + " !";
     }
 
     @Bean
     IntegrationFlow flow() {
         return IntegrationFlow
                 .from((MessageSource<String>) () ->
-                        MessageBuilder.withPayload("Hello world " + Instant.now() + " !").build(),
+                        MessageBuilder.withPayload(text()).build(),
                         poller -> poller.poller(pm -> pm.fixedRate(100)))
-                .channel(atob())
+                .filter(String.class, source -> source.contains("Hola"))
+                .channel(greetings())
                 .get();
     }
 
     @Bean
     IntegrationFlow flow1() {
         return IntegrationFlow
-                .from(atob())
-                .transform((GenericTransformer<String, String>) source -> source.toUpperCase())
+                .from(greetings())
+                .transform((GenericTransformer<String, String>) String::toUpperCase)
                 .handle((GenericHandler<String>) (payload, headers) -> {
                     System.out.println("the payload is " + payload);
                     return null;
