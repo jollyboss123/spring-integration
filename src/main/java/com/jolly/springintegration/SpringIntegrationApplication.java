@@ -9,6 +9,7 @@ import org.springframework.integration.core.GenericTransformer;
 import org.springframework.integration.core.MessageSource;
 import org.springframework.integration.dsl.IntegrationFlow;
 import org.springframework.integration.dsl.MessageChannels;
+import org.springframework.integration.dsl.context.IntegrationFlowContext;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.support.MessageBuilder;
@@ -16,6 +17,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 @SpringBootApplication
@@ -51,19 +53,29 @@ public class SpringIntegrationApplication {
         }
     }
 
-    @Bean
-    IntegrationFlow flow(CustomMessageSource customMessageSource) {
+    private static IntegrationFlow buildFlow(CustomMessageSource customMessageSource, String filterText, Duration pollDurationRate) {
         return IntegrationFlow
                 .from(customMessageSource,
                         sourcePollingChannelAdapterSpec -> sourcePollingChannelAdapterSpec.poller(
-                                pollerFactory -> pollerFactory.fixedRate(Duration.ofSeconds(3))
+                                pollerFactory -> pollerFactory.fixedRate(pollDurationRate)
                         ))
-                .filter(String.class, source -> source.contains("Hola"))
+                .filter(String.class, source -> source.contains(filterText))
                 .transform((GenericTransformer<String, String>) String::toUpperCase)
                 .handle((GenericHandler<String>) (payload, headers) -> {
                     System.out.println("the payload is " + payload);
                     return null;
                 })
                 .get();
+    }
+
+    @Bean
+    ApplicationRunner applicationRunner(CustomMessageSource customMessageSource, IntegrationFlowContext context) {
+        return args -> {
+            IntegrationFlow holaFlow = buildFlow(customMessageSource, "Hola", Duration.ofSeconds(1));
+            IntegrationFlow helloFlow = buildFlow(customMessageSource, "Hello", Duration.ofSeconds(2));
+
+            Set.of(holaFlow, helloFlow).forEach(flow ->
+                    context.registration(flow).register().start());
+        };
     }
 }
