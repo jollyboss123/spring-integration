@@ -7,22 +7,33 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.integration.annotation.Gateway;
 import org.springframework.integration.annotation.MessagingGateway;
+import org.springframework.integration.channel.DirectChannel;
+import org.springframework.integration.core.GenericHandler;
 import org.springframework.integration.core.GenericTransformer;
 import org.springframework.integration.core.MessageSource;
 import org.springframework.integration.dsl.IntegrationFlow;
 import org.springframework.integration.dsl.MessageChannels;
+import org.springframework.integration.dsl.PollerFactory;
+import org.springframework.integration.file.dsl.FileInboundChannelAdapterSpec;
+import org.springframework.integration.file.dsl.Files;
+import org.springframework.integration.file.transformer.FileToStringTransformer;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
+import org.springframework.messaging.MessageHeaders;
 import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.stereotype.Component;
+import org.springframework.util.SystemPropertyUtils;
 
+import java.io.File;
+import java.time.Duration;
 import java.time.Instant;
 
 @SpringBootApplication
 public class SpringIntegrationApplication {
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws InterruptedException {
         SpringApplication.run(SpringIntegrationApplication.class, args);
+        Thread.currentThread().join();
     }
 
     @Bean
@@ -31,7 +42,7 @@ public class SpringIntegrationApplication {
     }
 
     @Bean
-    MessageChannel greetingsResult() {
+    DirectChannel greetingsReply() {
         return MessageChannels.direct().getObject();
     }
 
@@ -62,11 +73,38 @@ public class SpringIntegrationApplication {
                 .from(greetingsRequest())
                 .filter(String.class, source -> source.contains("Hola"))
                 .transform((GenericTransformer<String, String>) String::toUpperCase)
-//                .handle((GenericHandler<String>) (payload, headers) -> {
-//                    System.out.println("the payload is " + payload);
-//                    return null;
-//                })
-                .channel(greetingsResult())
+                .channel(greetingsReply())
+                .get();
+    }
+
+    @Bean
+    IntegrationFlow inboundFileSystemFlow() {
+        File directory = new File(SystemPropertyUtils.resolvePlaceholders("${HOME}/Desktop/in"));
+        FileInboundChannelAdapterSpec files = Files.inboundAdapter(directory)
+                .autoCreateDirectory(true);
+        return IntegrationFlow
+                .from(files, poller -> poller.poller(pm -> PollerFactory.fixedRate(Duration.ofSeconds(1))))
+                .transform(new FileToStringTransformer()) // because greetingsRequest expects a String to filter
+                .handle((GenericHandler<String>) (payload, headers) -> {
+                    System.out.println("----- start of the line -----");
+                    headers.forEach((key, value) -> System.out.println(key + " = " + value));
+                    return payload;
+                })
+                .channel(greetingsRequest())
+                .get();
+    }
+
+    @Bean
+    IntegrationFlow outboundFileSystemFlow() {
+        File directory = new File(SystemPropertyUtils.resolvePlaceholders("${HOME}/Desktop/out"));
+        return IntegrationFlow
+                .from(greetingsReply())
+                .handle((GenericHandler<String>) (payload, headers) -> {
+                    System.out.println("----- end of the line -----");
+                    headers.forEach((key, value) -> System.out.println(key + " = " + value));
+                    return payload;
+                })
+                .handle(Files.outboundAdapter(directory).autoCreateDirectory(true))
                 .get();
     }
 }
@@ -74,22 +112,26 @@ public class SpringIntegrationApplication {
 @Component
 class Runner implements ApplicationRunner {
     private final GreetingsClient greetingsClient;
+    private final DirectChannel greetingsReply;
 
-    Runner(GreetingsClient greetingsClient) {
+    Runner(GreetingsClient greetingsClient, DirectChannel greetingsReply) {
         this.greetingsClient = greetingsClient;
+        this.greetingsReply = greetingsReply;
     }
 
     @Override
     public void run(ApplicationArguments args) throws Exception {
-        for (int i = 0; i < 10; i++) {
-            System.out.println(this.greetingsClient.greet(SpringIntegrationApplication.text()));
-        }
+//        this.greetingsReply.subscribe(message ->
+//                System.out.println("new message: "+ message.getPayload()));
+//        for (int i = 0; i < 100; i++) {
+//            this.greetingsClient.greet(SpringIntegrationApplication.text());
+//        }
     }
 }
 
 @MessagingGateway
 interface GreetingsClient {
 
-    @Gateway(requestChannel = "greetingsRequest", replyChannel = "greetingsResult")
-    String greet(String text);
+    @Gateway(requestChannel = "greetingsRequest")
+    void greet(String text);
 }
