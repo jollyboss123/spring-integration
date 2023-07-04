@@ -40,67 +40,55 @@ public class SpringIntegrationApplication {
         Thread.currentThread().join();
     }
 
-    static final String REQUESTS_CHANNEL = "requests";
-    static final String REPLIES_CHANNEL = "replies";
-
-    @Bean(name = REQUESTS_CHANNEL)
-    MessageChannel greetingsRequest() {
-        return MessageChannels.direct().getObject();
-    }
-
-    @Bean(name = REPLIES_CHANNEL)
-    DirectChannel greetingsReply() {
-        return MessageChannels.direct().getObject();
-    }
-
-    static String text() {
-        return Math.random() > .5 ?
-                "Hello " + Instant.now() + " !" :
-                "Hola " + Instant.now() + " !";
-    }
-
     /**
-     * message source are like suppliers
-     * that have to invoked i.e. polled/inquired
-     * have to provide poller definition
-     * by trigger, cron, fixed rate or delay
+     * by default when face error, will automatically look for a errorChannel bean
+     * and follow that bean's pipeline
+     * this is our global default error channel
+     *
+     * @return
      */
-    @Component
-    static class CustomMessageSource implements MessageSource<String> {
-
-        @Override
-        public Message<String> receive() {
-            return MessageBuilder.withPayload(text()).build();
-        }
+    @Bean
+    MessageChannel errorChannel() {
+        return MessageChannels.direct().getObject();
     }
 
     @Bean
-    IntegrationFlow flow() {
+    MessageChannel errorChannelForLetterViolation() {
+        return MessageChannels.direct().getObject();
+    }
+
+    @Bean
+    IntegrationFlow errorFlow() {
         return IntegrationFlow
-                .from(greetingsRequest())
-//                .enrichHeaders(spec -> spec.replyChannel(greetingsReply()))
-//                .filter(String.class, source -> source.contains("Hola"))
-//                .transform((GenericTransformer<String, String>) String::toUpperCase)
-//                .channel(greetingsReply())
-                .channel(UPPERCASE_IN)
+                .from(errorChannel())
+                .handle((payload, headers) -> {
+                    System.out.println("inside the errorFlow of: " + payload);
+                    headers.forEach((k, v) -> System.out.println(k +  " = " + v));
+                    return null;
+                })
                 .get();
     }
 
-    private static final String UPPERCASE_IN = "uin";
-    private static final String UPPERCASE_OUT = "uout";
+    @Bean
+    IntegrationFlow errorForLetterViolationFlow() {
+        return IntegrationFlow
+                .from(errorChannelForLetterViolation())
+                .handle((payload, headers) -> {
+                    System.out.println("inside the errorFlowForLetterViolation of: " + payload);
+                    headers.forEach((k, v) -> System.out.println(k +  " = " + v));
+                    return null;
+                })
+                .get();
+    }
 
-    /**
-     * component based handler
-     *
-     * @param id
-     * @param payload
-     * @return
-     */
-    @ServiceActivator(inputChannel = UPPERCASE_IN, outputChannel = UPPERCASE_OUT)
-    public String uppercase(@Header(MessageHeaders.ID) String id,
-                            @Payload String payload) {
-        System.out.println("the message id is: " + id);
-        return payload.toUpperCase();
+    @Bean
+    MessageChannel uppercaseIn() {
+        return MessageChannels.direct().getObject();
+    }
+
+    @Bean
+    MessageChannel uppercaseOut() {
+        return MessageChannels.direct().getObject();
     }
 
     @Bean
@@ -110,13 +98,31 @@ public class SpringIntegrationApplication {
                 .autoCreateDirectory(true);
         return IntegrationFlow
                 .from(files, poller -> poller.poller(pm -> PollerFactory.fixedRate(Duration.ofSeconds(2))))
-                .transform(new FileToStringTransformer()) // because greetingsRequest expects a String to filter
+                .transform(new FileToStringTransformer())
                 .handle((GenericHandler<String>) (payload, headers) -> {
                     System.out.println("----- start of the line -----");
                     headers.forEach((key, value) -> System.out.println(key + " = " + value));
                     return payload;
                 })
-                .channel(greetingsRequest())
+                .channel(uppercaseIn())
+                .get();
+    }
+
+    @Bean
+    IntegrationFlow uppercaseFlow() {
+        return IntegrationFlow
+                .from(uppercaseIn())
+                .enrichHeaders(b -> b.errorChannel(errorChannelForLetterViolation())) // will override the default global error handling channel
+                .handle((GenericHandler<String>) (payload, headers) -> {
+                    for (char c : payload.toCharArray()) {
+                        if (!Character.isLetter(c)) {
+                            throw new IllegalArgumentException("Must be a character: " + c);
+                        }
+                    }
+                    return payload;
+                })
+                .handle((GenericHandler<String>) (payload, headers) -> payload.toUpperCase())
+                .channel(uppercaseOut())
                 .get();
     }
 
@@ -124,8 +130,7 @@ public class SpringIntegrationApplication {
     IntegrationFlow outboundFileSystemFlow() {
         File directory = new File(SystemPropertyUtils.resolvePlaceholders("${HOME}/Desktop/out"));
         return IntegrationFlow
-//                .from(greetingsReply())
-                .from(UPPERCASE_OUT)
+                .from(uppercaseOut())
                 .handle((GenericHandler<String>) (payload, headers) -> {
                     System.out.println("----- end of the line -----");
                     headers.forEach((key, value) -> System.out.println(key + " = " + value));
@@ -135,38 +140,3 @@ public class SpringIntegrationApplication {
                 .get();
     }
 }
-
-//@Component
-//class Runner implements ApplicationRunner {
-//    private final GreetingsClient greetingsClient;
-//
-//    Runner(GreetingsClient greetingsClient) {
-//        this.greetingsClient = greetingsClient;
-//    }
-//
-//    @Override
-//    public void run(ApplicationArguments args) throws Exception {
-////        this.greetingsReply.subscribe(message ->
-////                System.out.println("new message: "+ message.getPayload()));
-////        for (int i = 0; i < 100; i++) {
-////            this.greetingsClient.greet(SpringIntegrationApplication.text());
-////        }
-//        String reply = this.greetingsClient.greet("Bussing");
-//        System.out.println("the reply: " + reply);
-//    }
-//}
-
-/**
- * the problem with gateway is that it waits for a reply
- * when the message does not pass or fails to (in this case does not contain filter text "Hola"),
- * there is nothing that would produce a reply
- * thus, it's stuck there and is infinite by default
- */
-
-//@MessagingGateway
-//interface GreetingsClient {
-//
-//    @Gateway(requestChannel = SpringIntegrationApplication.REQUESTS_CHANNEL,
-//    replyChannel = SpringIntegrationApplication.REPLIES_CHANNEL)
-//    String greet(String text);
-//}
