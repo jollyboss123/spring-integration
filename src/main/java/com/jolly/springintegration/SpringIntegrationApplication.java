@@ -48,27 +48,28 @@ public class SpringIntegrationApplication {
     }
 
     @Bean
+    MessageChannel loggingChannel() {
+        return MessageChannels.direct().getObject();
+    }
+
+    @Bean
+    IntegrationFlow loggingFlow() {
+        return IntegrationFlow
+                .from(loggingChannel())
+                .handle((payload, headers) -> {
+                    log.debug("logging {}", payload);
+                    headers.forEach((key, value) -> log.debug("{} = {}", key, value));
+                    return null;
+                })
+                .get();
+    }
+
+    @Bean
     IntegrationFlow etailerFlow() {
         return IntegrationFlow
                 .from(orders())
-                .split(
-                        (Function<Order, Collection<LineItem>>) Order::lineItems
-//                        new AbstractMessageSplitter() {
-//                    @Override
-//                    protected Object splitMessage(Message<?> message) {
-//                        Order order = (Order) message.getPayload();
-//                        log.debug("------------");
-//                        log.debug("received order: [{}]", order);
-//                        return order.lineItems();
-//                    }
-//                }
-                )
-                .handle((GenericHandler<LineItem>) (payload, headers) -> {
-                    log.debug("------------");
-                    log.debug("received individual line item");
-                    headers.forEach((key, value) -> log.debug("{} = {}", key, value));
-                    return payload;
-                })
+                .split((Function<Order, Collection<LineItem>>) Order::lineItems)
+                .wireTap(loggingChannel())
                 .aggregate()
                 .handle((payload, headers) -> {
                     log.debug("orders after aggregation: [{}]", payload);
