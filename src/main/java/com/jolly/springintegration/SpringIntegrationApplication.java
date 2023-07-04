@@ -1,37 +1,30 @@
 package com.jolly.springintegration;
 
-import org.springframework.boot.ApplicationArguments;
+import lombok.extern.log4j.Log4j2;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
-import org.springframework.integration.annotation.Gateway;
-import org.springframework.integration.annotation.MessagingGateway;
-import org.springframework.integration.annotation.Payloads;
-import org.springframework.integration.annotation.ServiceActivator;
-import org.springframework.integration.channel.DirectChannel;
 import org.springframework.integration.core.GenericHandler;
-import org.springframework.integration.core.GenericTransformer;
-import org.springframework.integration.core.MessageSource;
 import org.springframework.integration.dsl.IntegrationFlow;
 import org.springframework.integration.dsl.MessageChannels;
-import org.springframework.integration.dsl.PollerFactory;
-import org.springframework.integration.file.dsl.FileInboundChannelAdapterSpec;
-import org.springframework.integration.file.dsl.Files;
-import org.springframework.integration.file.transformer.FileToStringTransformer;
+import org.springframework.integration.splitter.AbstractMessageSplitter;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.MessageHeaders;
-import org.springframework.messaging.handler.annotation.Header;
-import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.messaging.support.MessageBuilder;
-import org.springframework.stereotype.Component;
-import org.springframework.util.SystemPropertyUtils;
 
-import java.io.File;
-import java.time.Duration;
-import java.time.Instant;
+import java.util.Collection;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
 
+/**
+ * spring integration is to ochestrate a pipeline
+ */
+@Log4j2
 @SpringBootApplication
 public class SpringIntegrationApplication {
 
@@ -40,103 +33,56 @@ public class SpringIntegrationApplication {
         Thread.currentThread().join();
     }
 
-    /**
-     * by default when face error, will automatically look for a errorChannel bean
-     * and follow that bean's pipeline
-     * this is our global default error channel
-     *
-     * @return
-     */
+    private final Map<Integer, Order> orderDb = new ConcurrentHashMap<>();
+
     @Bean
-    MessageChannel errorChannel() {
-        return MessageChannels.direct().getObject();
+    ApplicationRunner runner(MessageChannel orders) {
+        return event -> {
+            Order payload = new Order(1, Set.of(new LineItem("1"), new LineItem("2"), new LineItem("3")));
+            this.orderDb.put(payload.id(), payload);
+            Message<Order> orderMessage = MessageBuilder.withPayload(payload)
+                    .setHeader("orderId", payload.id())
+                    .build();
+            orders.send(orderMessage);
+        };
     }
 
     @Bean
-    MessageChannel errorChannelForLetterViolation() {
-        return MessageChannels.direct().getObject();
-    }
-
-    @Bean
-    IntegrationFlow errorFlow() {
+    IntegrationFlow etailerFlow() {
         return IntegrationFlow
-                .from(errorChannel())
+                .from(orders())
+                .split(
+                        (Function<Order, Collection<LineItem>>) Order::lineItems
+//                        new AbstractMessageSplitter() {
+//                    @Override
+//                    protected Object splitMessage(Message<?> message) {
+//                        Order order = (Order) message.getPayload();
+//                        log.debug("------------");
+//                        log.debug("received order: [{}]", order);
+//                        return order.lineItems();
+//                    }
+//                }
+                )
+                .handle((GenericHandler<LineItem>) (payload, headers) -> {
+                    log.debug("------------");
+                    log.debug("received individual line item");
+                    headers.forEach((key, value) -> log.debug("{} = {}", key, value));
+                    return payload;
+                })
+                .aggregate()
                 .handle((payload, headers) -> {
-                    System.out.println("inside the errorFlow of: " + payload);
-                    headers.forEach((k, v) -> System.out.println(k +  " = " + v));
+                    log.debug("orders after aggregation: [{}]", payload);
                     return null;
                 })
                 .get();
     }
 
     @Bean
-    IntegrationFlow errorForLetterViolationFlow() {
-        return IntegrationFlow
-                .from(errorChannelForLetterViolation())
-                .handle((payload, headers) -> {
-                    System.out.println("inside the errorFlowForLetterViolation of: " + payload);
-                    headers.forEach((k, v) -> System.out.println(k +  " = " + v));
-                    return null;
-                })
-                .get();
-    }
-
-    @Bean
-    MessageChannel uppercaseIn() {
+    MessageChannel orders() {
         return MessageChannels.direct().getObject();
-    }
-
-    @Bean
-    MessageChannel uppercaseOut() {
-        return MessageChannels.direct().getObject();
-    }
-
-    @Bean
-    IntegrationFlow inboundFileSystemFlow() {
-        File directory = new File(SystemPropertyUtils.resolvePlaceholders("${HOME}/Desktop/in"));
-        FileInboundChannelAdapterSpec files = Files.inboundAdapter(directory)
-                .autoCreateDirectory(true);
-        return IntegrationFlow
-                .from(files, poller -> poller.poller(pm -> PollerFactory.fixedRate(Duration.ofSeconds(2))))
-                .transform(new FileToStringTransformer())
-                .handle((GenericHandler<String>) (payload, headers) -> {
-                    System.out.println("----- start of the line -----");
-                    headers.forEach((key, value) -> System.out.println(key + " = " + value));
-                    return payload;
-                })
-                .channel(uppercaseIn())
-                .get();
-    }
-
-    @Bean
-    IntegrationFlow uppercaseFlow() {
-        return IntegrationFlow
-                .from(uppercaseIn())
-                .enrichHeaders(b -> b.errorChannel(errorChannelForLetterViolation())) // will override the default global error handling channel
-                .handle((GenericHandler<String>) (payload, headers) -> {
-                    for (char c : payload.toCharArray()) {
-                        if (!Character.isLetter(c)) {
-                            throw new IllegalArgumentException("Must be a character: " + c);
-                        }
-                    }
-                    return payload;
-                })
-                .handle((GenericHandler<String>) (payload, headers) -> payload.toUpperCase())
-                .channel(uppercaseOut())
-                .get();
-    }
-
-    @Bean
-    IntegrationFlow outboundFileSystemFlow() {
-        File directory = new File(SystemPropertyUtils.resolvePlaceholders("${HOME}/Desktop/out"));
-        return IntegrationFlow
-                .from(uppercaseOut())
-                .handle((GenericHandler<String>) (payload, headers) -> {
-                    System.out.println("----- end of the line -----");
-                    headers.forEach((key, value) -> System.out.println(key + " = " + value));
-                    return payload;
-                })
-                .handle(Files.outboundAdapter(directory).autoCreateDirectory(true))
-                .get();
     }
 }
+
+record Order(Integer id, Set<LineItem> lineItems) {}
+
+record LineItem(String sku) {}
