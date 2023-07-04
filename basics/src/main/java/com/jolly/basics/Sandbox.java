@@ -1,4 +1,4 @@
-package com.jolly.springintegration;
+package com.jolly.basics;
 
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;

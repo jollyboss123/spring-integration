@@ -1,4 +1,4 @@
-package com.jolly.springintegration;
+package com.jolly.basics;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.integration.core.GenericHandler;
