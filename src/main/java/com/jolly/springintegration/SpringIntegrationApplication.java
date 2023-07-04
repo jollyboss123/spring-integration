@@ -7,6 +7,8 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.integration.annotation.Gateway;
 import org.springframework.integration.annotation.MessagingGateway;
+import org.springframework.integration.annotation.Payloads;
+import org.springframework.integration.annotation.ServiceActivator;
 import org.springframework.integration.channel.DirectChannel;
 import org.springframework.integration.core.GenericHandler;
 import org.springframework.integration.core.GenericTransformer;
@@ -20,6 +22,8 @@ import org.springframework.integration.file.transformer.FileToStringTransformer;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.MessageHeaders;
+import org.springframework.messaging.handler.annotation.Header;
+import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.stereotype.Component;
 import org.springframework.util.SystemPropertyUtils;
@@ -74,63 +78,83 @@ public class SpringIntegrationApplication {
     IntegrationFlow flow() {
         return IntegrationFlow
                 .from(greetingsRequest())
+//                .enrichHeaders(spec -> spec.replyChannel(greetingsReply()))
 //                .filter(String.class, source -> source.contains("Hola"))
-                .transform((GenericTransformer<String, String>) String::toUpperCase)
-                .channel(greetingsReply())
+//                .transform((GenericTransformer<String, String>) String::toUpperCase)
+//                .channel(greetingsReply())
+                .channel(UPPERCASE_IN)
                 .get();
     }
 
-//    @Bean
-//    IntegrationFlow inboundFileSystemFlow() {
-//        File directory = new File(SystemPropertyUtils.resolvePlaceholders("${HOME}/Desktop/in"));
-//        FileInboundChannelAdapterSpec files = Files.inboundAdapter(directory)
-//                .autoCreateDirectory(true);
-//        return IntegrationFlow
-//                .from(files, poller -> poller.poller(pm -> PollerFactory.fixedRate(Duration.ofSeconds(1))))
-//                .transform(new FileToStringTransformer()) // because greetingsRequest expects a String to filter
-//                .handle((GenericHandler<String>) (payload, headers) -> {
-//                    System.out.println("----- start of the line -----");
-//                    headers.forEach((key, value) -> System.out.println(key + " = " + value));
-//                    return payload;
-//                })
-//                .channel(greetingsRequest())
-//                .get();
+    private static final String UPPERCASE_IN = "uin";
+    private static final String UPPERCASE_OUT = "uout";
+
+    /**
+     * component based handler
+     *
+     * @param id
+     * @param payload
+     * @return
+     */
+    @ServiceActivator(inputChannel = UPPERCASE_IN, outputChannel = UPPERCASE_OUT)
+    public String uppercase(@Header(MessageHeaders.ID) String id,
+                            @Payload String payload) {
+        System.out.println("the message id is: " + id);
+        return payload.toUpperCase();
+    }
+
+    @Bean
+    IntegrationFlow inboundFileSystemFlow() {
+        File directory = new File(SystemPropertyUtils.resolvePlaceholders("${HOME}/Desktop/in"));
+        FileInboundChannelAdapterSpec files = Files.inboundAdapter(directory)
+                .autoCreateDirectory(true);
+        return IntegrationFlow
+                .from(files, poller -> poller.poller(pm -> PollerFactory.fixedRate(Duration.ofSeconds(2))))
+                .transform(new FileToStringTransformer()) // because greetingsRequest expects a String to filter
+                .handle((GenericHandler<String>) (payload, headers) -> {
+                    System.out.println("----- start of the line -----");
+                    headers.forEach((key, value) -> System.out.println(key + " = " + value));
+                    return payload;
+                })
+                .channel(greetingsRequest())
+                .get();
+    }
+
+    @Bean
+    IntegrationFlow outboundFileSystemFlow() {
+        File directory = new File(SystemPropertyUtils.resolvePlaceholders("${HOME}/Desktop/out"));
+        return IntegrationFlow
+//                .from(greetingsReply())
+                .from(UPPERCASE_OUT)
+                .handle((GenericHandler<String>) (payload, headers) -> {
+                    System.out.println("----- end of the line -----");
+                    headers.forEach((key, value) -> System.out.println(key + " = " + value));
+                    return payload;
+                })
+                .handle(Files.outboundAdapter(directory).autoCreateDirectory(true))
+                .get();
+    }
+}
+
+//@Component
+//class Runner implements ApplicationRunner {
+//    private final GreetingsClient greetingsClient;
+//
+//    Runner(GreetingsClient greetingsClient) {
+//        this.greetingsClient = greetingsClient;
 //    }
 //
-//    @Bean
-//    IntegrationFlow outboundFileSystemFlow() {
-//        File directory = new File(SystemPropertyUtils.resolvePlaceholders("${HOME}/Desktop/out"));
-//        return IntegrationFlow
-//                .from(greetingsReply())
-//                .handle((GenericHandler<String>) (payload, headers) -> {
-//                    System.out.println("----- end of the line -----");
-//                    headers.forEach((key, value) -> System.out.println(key + " = " + value));
-//                    return payload;
-//                })
-//                .handle(Files.outboundAdapter(directory).autoCreateDirectory(true))
-//                .get();
+//    @Override
+//    public void run(ApplicationArguments args) throws Exception {
+////        this.greetingsReply.subscribe(message ->
+////                System.out.println("new message: "+ message.getPayload()));
+////        for (int i = 0; i < 100; i++) {
+////            this.greetingsClient.greet(SpringIntegrationApplication.text());
+////        }
+//        String reply = this.greetingsClient.greet("Bussing");
+//        System.out.println("the reply: " + reply);
 //    }
-}
-
-@Component
-class Runner implements ApplicationRunner {
-    private final GreetingsClient greetingsClient;
-
-    Runner(GreetingsClient greetingsClient) {
-        this.greetingsClient = greetingsClient;
-    }
-
-    @Override
-    public void run(ApplicationArguments args) throws Exception {
-//        this.greetingsReply.subscribe(message ->
-//                System.out.println("new message: "+ message.getPayload()));
-//        for (int i = 0; i < 100; i++) {
-//            this.greetingsClient.greet(SpringIntegrationApplication.text());
-//        }
-        String reply = this.greetingsClient.greet("Bussing");
-        System.out.println("the reply: " + reply);
-    }
-}
+//}
 
 /**
  * the problem with gateway is that it waits for a reply
@@ -139,10 +163,10 @@ class Runner implements ApplicationRunner {
  * thus, it's stuck there and is infinite by default
  */
 
-@MessagingGateway
-interface GreetingsClient {
-
-    @Gateway(requestChannel = SpringIntegrationApplication.REQUESTS_CHANNEL,
-    replyChannel = SpringIntegrationApplication.REPLIES_CHANNEL)
-    String greet(String text);
-}
+//@MessagingGateway
+//interface GreetingsClient {
+//
+//    @Gateway(requestChannel = SpringIntegrationApplication.REQUESTS_CHANNEL,
+//    replyChannel = SpringIntegrationApplication.REPLIES_CHANNEL)
+//    String greet(String text);
+//}
