@@ -44,10 +44,10 @@ class RabbitMqStreamsConfiguration {
         return IntegrationFlow
                 .from(RabbitStream.inboundAdapter(environment)
                         .configureContainer(container -> container.queueName(rabbitProperties.getStream().getName())))
-                .handle(((payload, headers) -> {
+                .handle((payload, headers) -> {
                     log.debug("got the stream payload: {}", payload);
                     return null;
-                }))
+                })
                 .get();
     }
 
@@ -58,11 +58,9 @@ class RabbitMqStreamsConfiguration {
 
     @Bean
     ApplicationRunner rabbitMqStreamInitialized() {
-        return args -> {
-            streamMessageChannel()
-                    .send(MessageBuilder.withPayload(
-                            RabbitMqStreamsApplication.payload("Integration stream")).build());
-        };
+        return args -> this.streamMessageChannel()
+                .send(MessageBuilder.withPayload(
+                        RabbitMqStreamsApplication.payload("Integration stream")).build());
     }
 
     @Bean
