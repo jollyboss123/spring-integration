@@ -1,0 +1,13 @@
+version: '3'
+
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    environment:
+      - RABBITMQ_DEFAULT_USER=user
+      - RABBITMQ_DEFAULT_PASS=password
+      - RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS=-rabbitmq_stream advertised_host localhost
+    ports:
+      - "5672:5672"
+      - "5552:5552"
+      - "15672:15672"

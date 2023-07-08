@@ -9,6 +9,7 @@
         <outputRelativeToContentRoot value="true" />
         <module name="rabbit-mq-basics" />
         <module name="basics" />
+        <module name="rabbit-mq-streams" />
       </profile>
     </annotationProcessing>
   </component>
@@ -16,6 +17,7 @@
     <option name="ADDITIONAL_OPTIONS_OVERRIDE">
       <module name="basics" options="-parameters" />
       <module name="rabbit-mq-basics" options="-parameters" />
+      <module name="rabbit-mq-streams" options="-parameters" />
       <module name="spring-integration" options="" />
     </option>
   </component>

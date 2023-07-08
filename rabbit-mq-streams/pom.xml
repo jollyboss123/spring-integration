@@ -9,10 +9,10 @@
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
     <groupId>com.jolly</groupId>
-    <artifactId>rabbit-mq-basics</artifactId>
+    <artifactId>rabbit-mq-streams</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>rabbit-mq-basics</name>
-    <description>rabbit-mq-basics</description>
+    <name>rabbit-mq-streams</name>
+    <description>rabbit-mq-streams</description>
     <properties>
         <java.version>17</java.version>
     </properties>
@@ -30,8 +30,8 @@
             <artifactId>spring-integration-amqp</artifactId>
         </dependency>
         <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-json</artifactId>
+            <groupId>org.springframework.amqp</groupId>
+            <artifactId>spring-rabbit-stream</artifactId>
         </dependency>
 
         <dependency>
@@ -58,10 +58,6 @@
 
     <build>
         <plugins>
-            <plugin>
-                <groupId>org.graalvm.buildtools</groupId>
-                <artifactId>native-maven-plugin</artifactId>
-            </plugin>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>

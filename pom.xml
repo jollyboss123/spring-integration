@@ -20,6 +20,7 @@
     <modules>
         <module>basics</module>
         <module>rabbit-mq-basics</module>
+        <module>rabbit-mq-streams</module>
     </modules>
 
 </project>
